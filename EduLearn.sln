@@ -1,0 +1,34 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduLearn.AuthService", "EduLearn.AuthService\EduLearn.AuthService.csproj", "{11111111-0000-0000-0000-000000000001}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduLearn.CourseService", "EduLearn.CourseService\EduLearn.CourseService.csproj", "{11111111-0000-0000-0000-000000000002}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduLearn.LessonService", "EduLearn.LessonService\EduLearn.LessonService.csproj", "{11111111-0000-0000-0000-000000000003}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduLearn.EnrollmentService", "EduLearn.EnrollmentService\EduLearn.EnrollmentService.csproj", "{11111111-0000-0000-0000-000000000004}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduLearn.ProgressService", "EduLearn.ProgressService\EduLearn.ProgressService.csproj", "{11111111-0000-0000-0000-000000000005}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduLearn.QuizService", "EduLearn.QuizService\EduLearn.QuizService.csproj", "{11111111-0000-0000-0000-000000000006}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduLearn.ReviewService", "EduLearn.ReviewService\EduLearn.ReviewService.csproj", "{11111111-0000-0000-0000-000000000007}"
+EndProject
+
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduLearn.WebApp", "EduLearn.WebApp\EduLearn.WebApp.csproj", "{11111111-0000-0000-0000-000000000008}"
+EndProject
+
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+EndGlobal
