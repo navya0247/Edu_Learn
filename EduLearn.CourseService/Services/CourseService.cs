@@ -1,3 +1,4 @@
+using System.Text.Json;
 using EduLearn.CourseService.DTOs;
 using EduLearn.CourseService.Entities;
 using EduLearn.CourseService.Interfaces;
@@ -5,25 +6,28 @@ using EduLearn.CourseService.Interfaces;
 namespace EduLearn.CourseService.Services;
 
 /// <summary>
-/// Implements ICourseService — course management business logic.
-/// Enforces two-step publish workflow from PDF requirements.
-/// Maps between Entity and DTO — controllers never touch raw entities.
+/// CourseService with Redis caching added.
+/// PDF Non-Functional: Redis IDistributedCache for popular course list (5-min TTL).
+/// Cache is invalidated when a course is approved, rejected, or deleted.
 /// </summary>
 public class CourseService : ICourseService
 {
     private readonly ICourseRepository _repo;
+    private readonly ICacheService _cache;
     private readonly ILogger<CourseService> _logger;
 
-    public CourseService(ICourseRepository repo, ILogger<CourseService> logger)
+    // Redis cache keys
+    private const string PublishedCoursesKey = "courses:published";
+    private const string TopCoursesKey       = "courses:top";
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5); // PDF: 5-min TTL
+
+    public CourseService(ICourseRepository repo, ICacheService cache, ILogger<CourseService> logger)
     {
         _repo   = repo;
+        _cache  = cache;
         _logger = logger;
     }
 
-    /// <summary>
-    /// Create new course — always starts as unpublished draft.
-    /// Instructor must call PublishCourse() when ready for review.
-    /// </summary>
     public async Task<CourseResponseDto> CreateCourse(CreateCourseDto dto, int instructorId)
     {
         var course = new Course
@@ -36,7 +40,7 @@ public class CourseService : ICourseService
             Price           = dto.Price,
             ThumbnailUrl    = dto.ThumbnailUrl,
             InstructorId    = instructorId,
-            IsPublished     = false,   // Always starts as draft
+            IsPublished     = false,
             IsApproved      = false,
             EnrollmentCount = 0,
             CreatedAt       = DateTime.UtcNow,
@@ -44,9 +48,7 @@ public class CourseService : ICourseService
         };
 
         var created = await _repo.Create(course);
-        _logger.LogInformation("Course created: '{Title}' by Instructor {Id}",
-            created.Title, created.InstructorId);
-
+        _logger.LogInformation("Course created: '{Title}' by Instructor {Id}", created.Title, created.InstructorId);
         return MapToResponse(created);
     }
 
@@ -62,28 +64,70 @@ public class CourseService : ICourseService
         return courses.Select(MapToSummary).ToList();
     }
 
+    /// <summary>
+    /// Get all published and approved courses.
+    /// ✅ Redis cached with 5-min TTL — PDF Non-Functional requirement.
+    /// Cache miss → DB query → store in Redis → return.
+    /// Cache hit → return from Redis directly (no DB call).
+    /// </summary>
     public async Task<IList<CourseSummaryDto>> GetPublishedCourses()
     {
+        // 1. Try Redis cache first
+        var cached = await _cache.GetAsync(PublishedCoursesKey);
+        if (cached != null)
+        {
+            _logger.LogInformation("Redis HIT: returning published courses from cache");
+            return JsonSerializer.Deserialize<List<CourseSummaryDto>>(cached)!;
+        }
+
+        // 2. Cache miss — query DB
+        _logger.LogInformation("Redis MISS: querying DB for published courses");
         var courses = await _repo.FindPublishedAndApproved();
-        return courses.Select(MapToSummary).ToList();
+        var dtos    = courses.Select(MapToSummary).ToList();
+
+        // 3. Store in Redis for 5 minutes
+        await _cache.SetAsync(
+            PublishedCoursesKey,
+            JsonSerializer.Serialize(dtos),
+            CacheTtl);
+
+        return dtos;
+    }
+
+    /// <summary>
+    /// Get top N courses by enrollment count.
+    /// ✅ Redis cached with 5-min TTL.
+    /// </summary>
+    public async Task<IList<CourseSummaryDto>> GetTopCourses(int count = 10)
+    {
+        var cacheKey = $"{TopCoursesKey}:{count}";
+        var cached   = await _cache.GetAsync(cacheKey);
+
+        if (cached != null)
+        {
+            _logger.LogInformation("Redis HIT: returning top {Count} courses from cache", count);
+            return JsonSerializer.Deserialize<List<CourseSummaryDto>>(cached)!;
+        }
+
+        var courses = await _repo.FindTopCourses(count);
+        var dtos    = courses.Select(MapToSummary).ToList();
+
+        await _cache.SetAsync(cacheKey, JsonSerializer.Serialize(dtos), CacheTtl);
+        return dtos;
     }
 
     public async Task<IList<CourseSummaryDto>> SearchCourses(string keyword)
     {
+        // Search is not cached — always fresh results
         var courses = await _repo.SearchCourses(keyword);
         return courses.Select(MapToSummary).ToList();
     }
 
-    /// <summary>
-    /// Update course — resets approval if already approved.
-    /// Admin must re-review after instructor edits.
-    /// </summary>
     public async Task<CourseResponseDto> UpdateCourse(int courseId, CreateCourseDto dto, int instructorId)
     {
         var course = await _repo.FindByCourseId(courseId)
             ?? throw new KeyNotFoundException($"Course {courseId} not found.");
 
-        // Only owner instructor can update
         if (course.InstructorId != instructorId)
             throw new UnauthorizedAccessException("You can only update your own courses.");
 
@@ -97,22 +141,21 @@ public class CourseService : ICourseService
         if (!string.IsNullOrWhiteSpace(dto.ThumbnailUrl))
             course.ThumbnailUrl = dto.ThumbnailUrl;
 
-        // Reset approval if already approved — admin must re-review after edits
         if (course.IsApproved)
         {
             course.IsApproved  = false;
             course.IsPublished = false;
-            _logger.LogInformation("Course {Id} reset to draft after instructor edit", courseId);
         }
 
         var updated = await _repo.Update(course);
+
+        // Invalidate cache — course list changed
+        await _cache.RemoveAsync(PublishedCoursesKey);
+        await _cache.RemoveAsync(TopCoursesKey + ":10");
+
         return MapToResponse(updated);
     }
 
-    /// <summary>
-    /// INSTRUCTOR ACTION — Submit for admin review.
-    /// Sets IsPublished = true. Course NOT yet visible to students.
-    /// </summary>
     public async Task PublishCourse(int courseId, int instructorId)
     {
         var course = await _repo.FindByCourseId(courseId)
@@ -126,27 +169,24 @@ public class CourseService : ICourseService
         _logger.LogInformation("Course {Id} submitted for admin approval", courseId);
     }
 
-    /// <summary>
-    /// ADMIN ACTION — Approve course for public listing.
-    /// Sets IsApproved = true. Course NOW visible in catalogue.
-    /// </summary>
     public async Task ApproveCourse(int courseId)
     {
         var course = await _repo.FindByCourseId(courseId)
             ?? throw new KeyNotFoundException($"Course {courseId} not found.");
 
         if (!course.IsPublished)
-            throw new InvalidOperationException("Course must be published by instructor before admin approves.");
+            throw new InvalidOperationException("Course must be published before approval.");
 
         course.IsApproved = true;
         await _repo.Update(course);
-        _logger.LogInformation("Course {Id} approved by admin — now in public catalogue", courseId);
+
+        // ✅ Invalidate cache — new course now in catalogue
+        await _cache.RemoveAsync(PublishedCoursesKey);
+        await _cache.RemoveAsync(TopCoursesKey + ":10");
+
+        _logger.LogInformation("Course {Id} approved — cache invalidated", courseId);
     }
 
-    /// <summary>
-    /// ADMIN ACTION — Reject course, send back to draft.
-    /// Both flags = false. Instructor must revise and re-publish.
-    /// </summary>
     public async Task RejectCourse(int courseId)
     {
         var course = await _repo.FindByCourseId(courseId)
@@ -155,31 +195,35 @@ public class CourseService : ICourseService
         course.IsApproved  = false;
         course.IsPublished = false;
         await _repo.Update(course);
-        _logger.LogWarning("Course {Id} rejected by admin", courseId);
+
+        // Invalidate cache
+        await _cache.RemoveAsync(PublishedCoursesKey);
+        await _cache.RemoveAsync(TopCoursesKey + ":10");
+
+        _logger.LogWarning("Course {Id} rejected — cache invalidated", courseId);
     }
 
     public async Task DeleteCourse(int courseId)
     {
-        var course = await _repo.FindByCourseId(courseId)
-            ?? throw new KeyNotFoundException($"Course {courseId} not found.");
-
         await _repo.Delete(courseId);
-        _logger.LogWarning("Course {Id} deleted", courseId);
-    }
 
-    public async Task<IList<CourseSummaryDto>> GetTopCourses(int count = 10)
-    {
-        var courses = await _repo.FindTopCourses(count);
-        return courses.Select(MapToSummary).ToList();
+        // Invalidate cache
+        await _cache.RemoveAsync(PublishedCoursesKey);
+        await _cache.RemoveAsync(TopCoursesKey + ":10");
+
+        _logger.LogWarning("Course {Id} deleted — cache invalidated", courseId);
     }
 
     public async Task IncrementEnrollment(int courseId)
-        => await _repo.IncrementEnrollment(courseId);
-
-    public async Task<IList<CourseSummaryDto>> FilterCourses(
-        string? category, string? level, string? keyword)
     {
-        // Keyword search takes priority
+        await _repo.IncrementEnrollment(courseId);
+
+        // Invalidate top courses cache — enrollment count changed
+        await _cache.RemoveAsync(TopCoursesKey + ":10");
+    }
+
+    public async Task<IList<CourseSummaryDto>> FilterCourses(string? category, string? level, string? keyword)
+    {
         if (!string.IsNullOrWhiteSpace(keyword))
         {
             var results = await _repo.SearchCourses(keyword);
@@ -190,7 +234,7 @@ public class CourseService : ICourseService
         return courses.Select(MapToSummary).ToList();
     }
 
-    // ── Private Mapping Helpers ───────────────────────────────────────────────
+    // ── Mapping Helpers ───────────────────────────────────────────────────────
 
     private static CourseResponseDto MapToResponse(Course c) => new()
     {

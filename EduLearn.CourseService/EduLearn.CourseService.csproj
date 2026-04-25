@@ -9,21 +9,23 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- PostgreSQL provider — same as AuthService -->
+    <!-- PostgreSQL -->
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.0" />
-
-    <!-- EF Core migrations CLI -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.0" />
 
-    <!-- JWT Bearer — validates tokens from AuthService (same secret) -->
+    <!-- JWT Bearer -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
 
-    <!-- Swagger UI -->
+    <!-- Swagger -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
 
-    <!-- Structured logging -->
+    <!-- Logging -->
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="5.0.0" />
+
+    <!-- ✅ NEW — Redis cache (PDF Non-Functional: 5-min TTL for popular courses) -->
+    <PackageReference Include="StackExchange.Redis" Version="2.7.33" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="8.0.0" />
   </ItemGroup>
 
 </Project>
