@@ -1,6 +1,7 @@
 using System.Text;
 using EduLearn.EnrollmentService.Data;
 using EduLearn.EnrollmentService.Interfaces;
+using EduLearn.EnrollmentService.Messaging;
 using EduLearn.EnrollmentService.Repositories;
 using EduLearn.EnrollmentService.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -12,10 +13,9 @@ using Serilog;
 Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateBootstrapLogger();
 
 var builder = WebApplication.CreateBuilder(args);
-
 builder.Host.UseSerilog((ctx, lc) => lc.ReadFrom.Configuration(ctx.Configuration).WriteTo.Console());
 
-// ── Database: EduLearn_Enrollment PostgreSQL ──────────────────────────────────
+// ── PostgreSQL ────────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<EnrollmentDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("EnrollmentDb"),
@@ -25,19 +25,25 @@ builder.Services.AddDbContext<EnrollmentDbContext>(options =>
 builder.Services.AddScoped<IEnrollmentRepository, EnrollmentRepository>();
 builder.Services.AddScoped<IEnrollmentService, EnrollmentService>();
 
-// ── JWT Bearer — same secret as AuthService ───────────────────────────────────
+// ── RabbitMQ Consumer (Background Service) ────────────────────────────────────
+// PDF Non-Functional: async enrollment confirmation events via RabbitMQ.
+// Listens to "payment.success" queue — auto-enrolls student after payment.
+// Skips gracefully if RabbitMQ is not running.
+builder.Services.AddHostedService<PaymentSuccessConsumer>();
+
+// ── JWT Bearer ────────────────────────────────────────────────────────────────
 var jwtSecret = builder.Configuration["Jwt:Secret"]
     ?? throw new InvalidOperationException("Jwt:Secret missing");
 
 builder.Services
-    .AddAuthentication(o =>
+    .AddAuthentication(options =>
     {
-        o.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-        o.DefaultChallengeScheme    = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme    = JwtBearerDefaults.AuthenticationScheme;
     })
-    .AddJwtBearer(o =>
+    .AddJwtBearer(options =>
     {
-        o.TokenValidationParameters = new TokenValidationParameters
+        options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
             IssuerSigningKey        = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
@@ -58,28 +64,35 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title       = "EduLearn Enrollment Service",
         Version     = "v1",
-        Description = "Student course enrollment, progress tracking and analytics"
+        Description = "Student enrollment with RabbitMQ auto-enrollment on payment"
     });
-
-    var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-    if (File.Exists(xmlPath)) c.IncludeXmlComments(xmlPath);
-
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "JWT from AuthService /api/auth/login — format: Bearer {token}",
-        Name = "Authorization", In = ParameterLocation.Header,
-        Type = SecuritySchemeType.ApiKey, Scheme = "Bearer"
+        Description = "Enter: Bearer {JWT token}",
+        Name        = "Authorization",
+        In          = ParameterLocation.Header,
+        Type        = SecuritySchemeType.ApiKey,
+        Scheme      = "Bearer"
     });
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
-        { new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }, Array.Empty<string>() }
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            },
+            Array.Empty<string>()
+        }
     });
 });
 
-builder.Services.AddCors(o => o.AddPolicy("EduLearnCors", p =>
-    p.WithOrigins("http://localhost:3000", "http://localhost:5173")
-     .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
+// ── CORS ──────────────────────────────────────────────────────────────────────
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("EduLearnCors", policy =>
+        policy.WithOrigins("http://localhost:3000", "http://localhost:5173")
+              .AllowAnyHeader().AllowAnyMethod().AllowCredentials());
+});
 
 builder.Services.AddHealthChecks();
 
@@ -92,7 +105,6 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
-app.UseHttpsRedirection();
 app.UseCors("EduLearnCors");
 app.UseSerilogRequestLogging();
 app.UseAuthentication();
