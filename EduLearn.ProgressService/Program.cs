@@ -27,6 +27,9 @@ builder.Services.AddScoped<ICertificateRepository, CertificateRepository>();
 builder.Services.AddScoped<IProgressService, ProgressService>();
 builder.Services.AddScoped<ICertificateService, CertificateService>();
 
+// ✅ FIX: Add HttpClientFactory for making HTTP calls to other services
+builder.Services.AddHttpClient();
+
 // ── JWT Bearer — same secret as AuthService ───────────────────────────────────
 var jwtSecret = builder.Configuration["Jwt:Secret"]
     ?? throw new InvalidOperationException("Jwt:Secret missing");
