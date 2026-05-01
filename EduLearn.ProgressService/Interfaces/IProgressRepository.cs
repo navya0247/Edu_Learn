@@ -15,6 +15,7 @@ public interface IProgressRepository
 // Repository interface — DB operations for Certificate
 public interface ICertificateRepository
 {
+    Task<Certificate?> FindById(int certificateId);  // ✅ ADDED - Fix for download
     Task<Certificate?> FindByStudentAndCourse(int studentId, int courseId);
     Task<Certificate?> FindByCertificateCode(string code);          // public verification
     Task<IList<Certificate>> FindByStudentId(int studentId);

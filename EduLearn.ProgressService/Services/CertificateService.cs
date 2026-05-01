@@ -71,7 +71,8 @@ public class CertificateService : ICertificateService
     // Returns PDF as byte array — caller decides to stream or save to Azure Blob
     public async Task<byte[]> GenerateCertificatePdf(int certificateId)
     {
-        var cert = await _repo.FindByCertificateCode(certificateId.ToString())
+        // ✅ FIXED: Use FindById instead of FindByCertificateCode
+        var cert = await _repo.FindById(certificateId)
             ?? throw new KeyNotFoundException($"Certificate {certificateId} not found.");
 
         var pdfBytes = Document.Create(container =>
@@ -129,7 +130,6 @@ public class CertificateService : ICertificateService
             });
         }).GeneratePdf();
 
-        await Task.CompletedTask;
         return pdfBytes;
     }
 

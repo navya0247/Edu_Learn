@@ -16,13 +16,11 @@ public class ProgressRepository : IProgressRepository
         => await _db.LessonProgresses
             .FirstOrDefaultAsync(lp => lp.StudentId == studentId && lp.LessonId == lessonId);
 
-    // All progress records for student in a course — ordered by lessonId
     public async Task<IList<LessonProgress>> FindByCourseAndStudent(int studentId, int courseId)
         => await _db.LessonProgresses
             .Where(lp => lp.StudentId == studentId && lp.CourseId == courseId)
             .ToListAsync();
 
-    // Count completed lessons — used for progress % calculation
     public async Task<int> CountCompletedLessons(int studentId, int courseId)
         => await _db.LessonProgresses
             .CountAsync(lp => lp.StudentId == studentId
@@ -51,11 +49,15 @@ public class CertificateRepository : ICertificateRepository
 
     public CertificateRepository(ProgressDbContext db) => _db = db;
 
+    // ✅ ADDED - Find by ID for download
+    public async Task<Certificate?> FindById(int certificateId)
+        => await _db.Certificates
+            .FirstOrDefaultAsync(c => c.CertificateId == certificateId);
+
     public async Task<Certificate?> FindByStudentAndCourse(int studentId, int courseId)
         => await _db.Certificates
             .FirstOrDefaultAsync(c => c.StudentId == studentId && c.CourseId == courseId);
 
-    // Public verification — no auth needed, just needs the unique code
     public async Task<Certificate?> FindByCertificateCode(string code)
         => await _db.Certificates
             .FirstOrDefaultAsync(c => c.CertificateCode == code);
