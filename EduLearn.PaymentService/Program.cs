@@ -11,86 +11,43 @@ using Serilog;
 using System.Text;
 
 Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateLogger();
-
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog();
 
-// ── PostgreSQL ────────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<PaymentDbContext>(options =>
-    options.UseNpgsql(
-        builder.Configuration.GetConnectionString("PaymentDb"),
+    options.UseNpgsql(builder.Configuration.GetConnectionString("PaymentDb"),
         sql => sql.MigrationsAssembly("EduLearn.PaymentService")));
 
-// ── JWT Bearer ────────────────────────────────────────────────────────────────
 var jwtSecret = builder.Configuration["Jwt:Secret"]!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
-            ValidateIssuer           = false,
-            ValidateAudience         = false,
-            ClockSkew                = TimeSpan.Zero
-        };
-    });
+    .AddJwtBearer(options => { options.TokenValidationParameters = new TokenValidationParameters { ValidateIssuerSigningKey = true, IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)), ValidateIssuer = false, ValidateAudience = false, ClockSkew = TimeSpan.Zero }; });
 
 builder.Services.AddAuthorization();
-
-// ── DI ────────────────────────────────────────────────────────────────────────
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
-
-// ✅ RabbitMQ publisher — registered as Scoped so PaymentService can inject it
 builder.Services.AddScoped<RabbitMqPublisher>();
-
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new OpenApiInfo { Title = "EduLearn Payment Service", Version = "v1" }); c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme { Name = "Authorization", Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT", In = ParameterLocation.Header }); c.AddSecurityRequirement(new OpenApiSecurityRequirement { { new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }, Array.Empty<string>() } }); });
 
-// ── Swagger ───────────────────────────────────────────────────────────────────
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title       = "EduLearn Payment Service",
-        Version     = "v1",
-        Description = "Razorpay payments with RabbitMQ async enrollment events"
-    });
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Name         = "Authorization",
-        Type         = SecuritySchemeType.Http,
-        Scheme       = "bearer",
-        BearerFormat = "JWT",
-        In           = ParameterLocation.Header
-    });
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
-            Array.Empty<string>()
-        }
-    });
-});
-
-// ── CORS ──────────────────────────────────────────────────────────────────────
-builder.Services.AddCors(o => o.AddPolicy("AllowAll", p =>
-    p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddCors(o => o.AddPolicy("EduLearnCors", p =>
+    p.WithOrigins("http://localhost:3000", "http://localhost:5173", "https://edulearn-frontend-sbw4.onrender.com")
+     .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
 var app = builder.Build();
 
-app.UseSwagger();
-app.UseSwaggerUI(c =>
+using (var scope = app.Services.CreateScope())
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "EduLearn Payment Service v1");
-    c.RoutePrefix = "swagger";
-});
+    var db = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
+    try { db.Database.Migrate(); Log.Information("Payment DB migrated!"); }
+    catch (Exception ex) { Log.Error(ex, "Payment DB migration failed!"); }
+}
 
-app.UseCors("AllowAll");
+app.UseSwagger();
+app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "EduLearn Payment Service v1"); c.RoutePrefix = "swagger"; });
+app.UseCors("EduLearnCors");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-
 Log.Information("EduLearn Payment Service running → http://localhost:5008/swagger");
 app.Run();
