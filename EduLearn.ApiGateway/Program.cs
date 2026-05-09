@@ -65,7 +65,11 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("EduLearnCors", policy =>
-        policy.WithOrigins("http://localhost:3000", "http://localhost:5173")
+       policy.WithOrigins(
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://edulearn-frontend-sbw4.onrender.com"
+)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials());

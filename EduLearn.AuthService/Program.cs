@@ -23,7 +23,7 @@ builder.Host.UseSerilog((ctx, lc) => lc
     .ReadFrom.Configuration(ctx.Configuration)
     .WriteTo.Console());
 
-// ── Database — EduLearn_Auth (SQL Server LocalDB) ─────────────────────────────
+// ── Database — EduLearn_Auth ─────────────────────────────────────────────────
 builder.Services.AddDbContext<AuthDbContext>(options =>
     options.UseNpgsql(
     builder.Configuration.GetConnectionString("AuthDb"),
@@ -31,11 +31,8 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
 ));
 
 // ── Dependency Injection ──────────────────────────────────────────────────────
-// AddScoped = new instance per HTTP request
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IUserService, UserService>();
-
-// JwtHelper registered as singleton — stateless, safe to reuse
 builder.Services.AddSingleton<JwtHelper>();
 
 // ── JWT Bearer Authentication ─────────────────────────────────────────────────
@@ -62,14 +59,11 @@ builder.Services
     })
     .AddGoogle(options =>
     {
-        // Fill these in appsettings.json when you want Google login
         options.ClientId     = builder.Configuration["Google:ClientId"] ?? "";
         options.ClientSecret = builder.Configuration["Google:ClientSecret"] ?? "";
     });
 
 builder.Services.AddAuthorization();
-
-// ── Controllers ───────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
@@ -82,8 +76,6 @@ builder.Services.AddSwaggerGen(c =>
         Version     = "v1",
         Description = "Handles user registration, login, JWT tokens, and profile management"
     });
-
-    // Adds Authorize button in Swagger UI to test protected endpoints
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "Enter: Bearer {your JWT token}",
@@ -108,13 +100,15 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// ── CORS — allow React frontend ───────────────────────────────────────────────
+// ── CORS — allow React frontend (local + deployed) ────────────────────────────
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("EduLearnCors", policy =>
         policy.WithOrigins(
-                  "http://localhost:3000",  // React dev server
-                  "http://localhost:5173")  // Vite dev server (if used)
+                  "http://localhost:3000",
+                  "http://localhost:5173",
+                  "https://edulearn-frontend-sbw4.onrender.com"  // deployed frontend
+              )
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials());
@@ -122,8 +116,22 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddHealthChecks();
 
-// ── Build App ─────────────────────────────────────────────────────────────────
 var app = builder.Build();
+
+// ── AUTO MIGRATE ON STARTUP ───────────────────────────────────────────────────
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+    try
+    {
+        db.Database.Migrate();
+        Log.Information("Database migration completed successfully!");
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Database migration failed!");
+    }
+}
 
 // ── Swagger UI ────────────────────────────────────────────────────────────────
 app.UseSwagger();
@@ -137,7 +145,7 @@ app.UseSwaggerUI(c =>
 app.UseHttpsRedirection();
 app.UseCors("EduLearnCors");
 app.UseSerilogRequestLogging();
-app.UseAuthentication();   // Must be before UseAuthorization
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
