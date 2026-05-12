@@ -15,11 +15,19 @@ public class CertificateService : ICertificateService
 
     public CertificateService(ICertificateRepository repo, ILogger<CertificateService> logger)
     {
-        _repo   = repo;
+        _repo = repo;
         _logger = logger;
 
         // QuestPDF community license — free for open source projects
-        QuestPDF.Settings.License = LicenseType.Community;
+        // QuestPDF community license — free for open source projects
+        try
+        {
+            QuestPDF.Settings.License = LicenseType.Community;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "QuestPDF initialization failed — PDF generation unavailable on this platform");
+        }
     }
 
     // Issue certificate — one per student per course (unique index enforced in DB)
@@ -32,11 +40,11 @@ public class CertificateService : ICertificateService
 
         var certificate = new Certificate
         {
-            StudentId       = dto.StudentId,
-            CourseId        = dto.CourseId,
-            StudentName     = dto.StudentName,
-            CourseName      = dto.CourseName,
-            IssuedAt        = DateTime.UtcNow,
+            StudentId = dto.StudentId,
+            CourseId = dto.CourseId,
+            StudentName = dto.StudentName,
+            CourseName = dto.CourseName,
+            IssuedAt = DateTime.UtcNow,
             // Unique code: CERT-{first 8 chars of new GUID uppercase}
             CertificateCode = $"CERT-{Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper()}"
         };
@@ -135,13 +143,13 @@ public class CertificateService : ICertificateService
 
     private static CertificateDto MapToDto(Certificate c) => new()
     {
-        CertificateId   = c.CertificateId,
-        StudentId       = c.StudentId,
-        CourseId        = c.CourseId,
-        StudentName     = c.StudentName,
-        CourseName      = c.CourseName,
-        IssuedAt        = c.IssuedAt,
+        CertificateId = c.CertificateId,
+        StudentId = c.StudentId,
+        CourseId = c.CourseId,
+        StudentName = c.StudentName,
+        CourseName = c.CourseName,
+        IssuedAt = c.IssuedAt,
         CertificateCode = c.CertificateCode,
-        PdfUrl          = c.PdfUrl
+        PdfUrl = c.PdfUrl
     };
 }
